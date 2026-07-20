@@ -26,7 +26,7 @@ app.get('/api/clients', async (req, res) => {
     res.json(clients);
   } catch (error) {
     console.error("Error in GET /api/clients:", error);
-    res.status(500).json({ error: "Failed to fetch clients" });
+    res.status(500).json({ error: error.message || "Failed to fetch clients" });
   }
 });
 
@@ -39,7 +39,6 @@ app.post('/api/clients', async (req, res) => {
       return res.status(400).json({ error: "Name and Agency Name are required" });
     }
 
-    const clients = await dbManager.getClients();
     const newClient = {
       id: generateId('client'),
       name,
@@ -53,13 +52,11 @@ app.post('/api/clients', async (req, res) => {
       calls: []
     };
 
-    clients.unshift(newClient); // Add to beginning of list
-    await dbManager.saveClients(clients);
-
-    res.status(201).json(newClient);
+    const savedClient = await dbManager.addClient(newClient);
+    res.status(201).json(savedClient);
   } catch (error) {
     console.error("Error in POST /api/clients:", error);
-    res.status(500).json({ error: "Failed to create client" });
+    res.status(500).json({ error: error.message || "Failed to create client" });
   }
 });
 
@@ -69,30 +66,20 @@ app.put('/api/clients/:id', async (req, res) => {
     const { id } = req.params;
     const { name, agencyName, phone, email, city, status, notes } = req.body;
 
-    const clients = await dbManager.getClients();
-    const clientIndex = clients.findIndex(c => c.id === id);
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (agencyName !== undefined) updates.agencyName = agencyName;
+    if (phone !== undefined) updates.phone = phone;
+    if (email !== undefined) updates.email = email;
+    if (city !== undefined) updates.city = city;
+    if (status !== undefined) updates.status = status;
+    if (notes !== undefined) updates.notes = notes;
 
-    if (clientIndex === -1) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-
-    // Merge updates
-    clients[clientIndex] = {
-      ...clients[clientIndex],
-      name: name !== undefined ? name : clients[clientIndex].name,
-      agencyName: agencyName !== undefined ? agencyName : clients[clientIndex].agencyName,
-      phone: phone !== undefined ? phone : clients[clientIndex].phone,
-      email: email !== undefined ? email : clients[clientIndex].email,
-      city: city !== undefined ? city : clients[clientIndex].city,
-      status: status !== undefined ? status : clients[clientIndex].status,
-      notes: notes !== undefined ? notes : clients[clientIndex].notes,
-    };
-
-    await dbManager.saveClients(clients);
-    res.json(clients[clientIndex]);
+    const updatedClient = await dbManager.updateClient(id, updates);
+    res.json(updatedClient);
   } catch (error) {
     console.error("Error in PUT /api/clients/:id:", error);
-    res.status(500).json({ error: "Failed to update client" });
+    res.status(500).json({ error: error.message || "Failed to update client" });
   }
 });
 
@@ -100,18 +87,11 @@ app.put('/api/clients/:id', async (req, res) => {
 app.delete('/api/clients/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const clients = await dbManager.getClients();
-    const filteredClients = clients.filter(c => c.id !== id);
-
-    if (clients.length === filteredClients.length) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-
-    await dbManager.saveClients(filteredClients);
+    await dbManager.deleteClient(id);
     res.json({ success: true, message: "Client deleted successfully" });
   } catch (error) {
     console.error("Error in DELETE /api/clients/:id:", error);
-    res.status(500).json({ error: "Failed to delete client" });
+    res.status(500).json({ error: error.message || "Failed to delete client" });
   }
 });
 
@@ -125,13 +105,6 @@ app.post('/api/clients/:id/calls', async (req, res) => {
       return res.status(400).json({ error: "Call status/outcome is required" });
     }
 
-    const clients = await dbManager.getClients();
-    const clientIndex = clients.findIndex(c => c.id === id);
-
-    if (clientIndex === -1) {
-      return res.status(404).json({ error: "Client not found" });
-    }
-
     const newCall = {
       id: generateId('call'),
       timestamp: new Date().toISOString(),
@@ -140,16 +113,11 @@ app.post('/api/clients/:id/calls', async (req, res) => {
       callbackDate: callbackDate || ''
     };
 
-    // Add call log
-    clients[clientIndex].calls.unshift(newCall);
-    // Update client status automatically based on the latest call status
-    clients[clientIndex].status = status;
-
-    await dbManager.saveClients(clients);
-    res.status(201).json(clients[clientIndex]);
+    const updatedClient = await dbManager.logCall(id, newCall);
+    res.status(201).json(updatedClient);
   } catch (error) {
     console.error("Error in POST /api/clients/:id/calls:", error);
-    res.status(500).json({ error: "Failed to log call" });
+    res.status(500).json({ error: error.message || "Failed to log call" });
   }
 });
 
@@ -161,7 +129,6 @@ app.post('/api/import', async (req, res) => {
       return res.status(400).json({ error: "Invalid data format. Must contain a 'clients' array." });
     }
 
-    // Basic format validation
     const formattedClients = clients.map(client => ({
       id: client.id || generateId('client'),
       name: client.name || "Unnamed Client",
@@ -181,11 +148,11 @@ app.post('/api/import', async (req, res) => {
       })) : []
     }));
 
-    await dbManager.saveClients(formattedClients);
+    await dbManager.importClients(formattedClients);
     res.json({ success: true, count: formattedClients.length });
   } catch (error) {
     console.error("Error in POST /api/import:", error);
-    res.status(500).json({ error: "Failed to import data" });
+    res.status(500).json({ error: error.message || "Failed to import data" });
   }
 });
 

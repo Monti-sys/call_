@@ -145,73 +145,188 @@ class DbManager {
     }
   }
 
-  // GET ALL CLIENTS (asynchronous)
+  // GET ALL CLIENTS
   async getClients() {
     const supabase = getSupabase();
     if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('clients')
-          .select('*');
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*');
 
-        if (error) throw error;
-
-        // Auto-seed empty cloud table if it contains 0 records
-        if (!data || data.length === 0) {
-          const { error: seedError } = await supabase
-            .from('clients')
-            .insert(SEED_CLIENTS);
-
-          if (seedError) throw seedError;
-          console.log("🌱 Seeded Supabase database table with demo agents");
-          return SEED_CLIENTS;
-        }
-
-        // Sort data by dateAdded descending in code or rely on SQL
-        return data.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
-      } catch (error) {
-        console.error("Error fetching from Supabase, falling back to local JSON:", error);
-        return this.readLocal().clients;
+      if (error) {
+        console.error("Supabase select error:", error);
+        throw error;
       }
+
+      // Auto-seed empty cloud table if it contains 0 records
+      if (!data || data.length === 0) {
+        const { error: seedError } = await supabase
+          .from('clients')
+          .insert(SEED_CLIENTS);
+
+        if (seedError) throw seedError;
+        console.log("🌱 Seeded Supabase database table with demo agents");
+        return SEED_CLIENTS;
+      }
+
+      return data.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
     } else {
       // Local fallback
       return this.readLocal().clients;
     }
   }
 
-  // SAVE ALL CLIENTS (asynchronous)
-  async saveClients(clients) {
+  // ADD NEW CLIENT
+  async addClient(client) {
     const supabase = getSupabase();
     if (supabase) {
-      try {
-        // Clear all current records from Supabase table
-        const { error: deleteError } = await supabase
-          .from('clients')
-          .delete()
-          .neq('id', ''); // Delete all rows where id is not empty (clears table)
+      const { error } = await supabase
+        .from('clients')
+        .insert(client);
 
-        if (deleteError) throw deleteError;
-
-        // Bulk insert updated state array
-        if (clients.length > 0) {
-          const { error: insertError } = await supabase
-            .from('clients')
-            .insert(clients);
-
-          if (insertError) throw insertError;
-        }
-        return true;
-      } catch (error) {
-        console.error("Error saving to Supabase, falling back to local JSON:", error);
-        const dbLocal = this.readLocal();
-        dbLocal.clients = clients;
-        return this.writeLocal(dbLocal);
+      if (error) {
+        console.error("Supabase insert error:", error);
+        throw error;
       }
+      return client;
     } else {
-      // Local fallback
-      const dbLocal = this.readLocal();
-      dbLocal.clients = clients;
-      return this.writeLocal(dbLocal);
+      const clients = this.readLocal().clients;
+      clients.unshift(client);
+      this.writeLocal({ clients });
+      return client;
+    }
+  }
+
+  // UPDATE EXISTING CLIENT
+  async updateClient(id, updates) {
+    const supabase = getSupabase();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('clients')
+        .update(updates)
+        .eq('id', id)
+        .select();
+
+      if (error) {
+        console.error("Supabase update error:", error);
+        throw error;
+      }
+      if (!data || data.length === 0) {
+        throw new Error("Client not found in Supabase");
+      }
+      return data[0];
+    } else {
+      const clients = this.readLocal().clients;
+      const index = clients.findIndex(c => c.id === id);
+      if (index !== -1) {
+        clients[index] = { ...clients[index], ...updates };
+        this.writeLocal({ clients });
+        return clients[index];
+      }
+      throw new Error("Client not found locally");
+    }
+  }
+
+  // DELETE CLIENT
+  async deleteClient(id) {
+    const supabase = getSupabase();
+    if (supabase) {
+      const { error } = await supabase
+        .from('clients')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error("Supabase delete error:", error);
+        throw error;
+      }
+      return true;
+    } else {
+      const clients = this.readLocal().clients;
+      const filtered = clients.filter(c => c.id !== id);
+      this.writeLocal({ clients: filtered });
+      return true;
+    }
+  }
+
+  // LOG OUTBOUND CALL
+  async logCall(clientId, call) {
+    const supabase = getSupabase();
+    if (supabase) {
+      // 1. Fetch current calls array
+      const { data, error: fetchError } = await supabase
+        .from('clients')
+        .select('calls')
+        .eq('id', clientId)
+        .single();
+
+      if (fetchError) {
+        console.error("Supabase fetch calls error:", fetchError);
+        throw fetchError;
+      }
+
+      const currentCalls = data.calls || [];
+      const updatedCalls = [call, ...currentCalls];
+
+      // 2. Prepend call and update status
+      const { data: updatedData, error: updateError } = await supabase
+        .from('clients')
+        .update({ calls: updatedCalls, status: call.status })
+        .eq('id', clientId)
+        .select();
+
+      if (updateError) {
+        console.error("Supabase log call update error:", updateError);
+        throw updateError;
+      }
+      if (!updatedData || updatedData.length === 0) {
+        throw new Error("Failed to return updated client after logging call");
+      }
+      return updatedData[0];
+    } else {
+      const clients = this.readLocal().clients;
+      const index = clients.findIndex(c => c.id === clientId);
+      if (index !== -1) {
+        const currentCalls = clients[index].calls || [];
+        clients[index].calls = [call, ...currentCalls];
+        clients[index].status = call.status;
+        this.writeLocal({ clients });
+        return clients[index];
+      }
+      throw new Error("Client not found locally");
+    }
+  }
+
+  // BULK IMPORT
+  async importClients(importedClients) {
+    const supabase = getSupabase();
+    if (supabase) {
+      // Delete all records
+      const { error: deleteError } = await supabase
+        .from('clients')
+        .delete()
+        .neq('id', '');
+
+      if (deleteError) {
+        console.error("Supabase import clear error:", deleteError);
+        throw deleteError;
+      }
+
+      // Insert new records
+      if (importedClients.length > 0) {
+        const { error: insertError } = await supabase
+          .from('clients')
+          .insert(importedClients);
+
+        if (insertError) {
+          console.error("Supabase import insert error:", insertError);
+          throw insertError;
+        }
+      }
+      return true;
+    } else {
+      this.writeLocal({ clients: importedClients });
+      return true;
     }
   }
 }
