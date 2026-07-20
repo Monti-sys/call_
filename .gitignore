@@ -1,0 +1,25 @@
+# Node dependency folders
+node_modules/
+client/node_modules/
+api/node_modules/
+
+# Production build folder
+dist/
+
+# Local database files
+api/database.json
+api/database.backup.json
+
+# Environment variables files
+.env
+.env.local
+.env.production
+
+# Editor files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

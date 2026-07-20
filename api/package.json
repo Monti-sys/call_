@@ -1,0 +1,19 @@
+{
+  "name": "call-crm-api",
+  "version": "1.0.0",
+  "description": "Serverless backend API for Call CRM",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "@supabase/supabase-js": "^2.43.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
